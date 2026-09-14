@@ -4,6 +4,7 @@ import numpy as np
 import joblib
 import plotly.express as px
 import shap
+import streamlit.components.v1 as components
 from lime.lime_tabular import LimeTabularExplainer
 from streamlit_option_menu import option_menu
 from reportlab.lib.pagesizes import A4
@@ -12,9 +13,12 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import os
 
-# ================================================================
-# 1. PAGE CONFIGURATION (MUST BE THE FIRST STREAMLIT COMMAND)
-# ================================================================
+# --- LOAD MODEL COMPONENTS ---
+best_model = joblib.load("best_model.joblib")
+preprocessor = joblib.load("preprocessor.joblib")
+selected_features = joblib.load("selected_features.joblib")
+
+# --- PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="Hypertension Risk Intelligence",
     page_icon="🩺",
@@ -22,25 +26,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ================================================================
-# 2. LOAD MODEL COMPONENTS WITH CACHING
-# ================================================================
-@st.cache_resource
-def load_artifacts():
-    best_model = joblib.load("best_model.joblib")
-    preprocessor = joblib.load("preprocessor.joblib")
-    selected_features = joblib.load("selected_features.joblib")
-    return best_model, preprocessor, selected_features
-
-try:
-    best_model, preprocessor, selected_features = load_artifacts()
-except Exception as e:
-    st.error(f"Error loading model artifacts: {e}. Please ensure 'best_model.joblib', 'preprocessor.joblib', and 'selected_features.joblib' are in the application root directory.")
-    st.stop()
-
-# ================================================================
-# 3. MODERN CUSTOM CSS STYLING
-# ================================================================
+# --- MODERN CUSTOM CSS STYLING ---
 st.markdown("""
     <style>
         /* Main background and typography */
@@ -175,9 +161,33 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ================================================================
-# 4. SCIENTIFIC PATIENT EXPLANATION GENERATOR
-# ================================================================
+# --- AUTOMATED CLINICAL RECOMMENDATIONS ENGINE ---
+def generate_clinical_recommendations(risk_level, systolic, diastolic, bmi, smoking, activity, cholesterol):
+    recs = []
+    
+    if risk_level == "High Risk":
+        recs.append("<b>Medical Consultation:</b> Urgent evaluation by a primary care physician or cardiologist within 1–2 weeks.")
+        recs.append("<b>Dietary Interventions:</b> Adopt a strict DASH (Dietary Approaches to Stop Hypertension) diet. Limit sodium intake to < 1,500 mg/day.")
+    elif risk_level == "Moderate Risk":
+        recs.append("<b>Medical Consultation:</b> Schedule a routine clinical blood pressure check within 1 month.")
+        recs.append("<b>Dietary Interventions:</b> Moderately restrict sodium intake to < 2,300 mg/day and increase dietary potassium (leafy greens, bananas).")
+    else:
+        recs.append("<b>Medical Consultation:</b> Re-screen during routine annual health examinations.")
+        recs.append("<b>Dietary Interventions:</b> Maintain a balanced, heart-healthy Mediterranean or DASH diet pattern.")
+        
+    if smoking == "Yes":
+        recs.append("<b>Lifestyle Intervention:</b> Prioritize smoking cessation. Nicotine causes acute vasospasm; refer to cessation counseling or nicotine replacement therapy.")
+    if activity == "Low":
+        recs.append("<b>Physical Activity:</b> Gradually introduce at least 150 minutes of moderate-intensity aerobic exercise (e.g., brisk walking) per week.")
+    if bmi >= 25:
+        recs.append("<b>Weight Management:</b> Target a 5–10% body weight reduction over 6 months to significantly decrease systemic vascular resistance.")
+    if cholesterol >= 200:
+        recs.append("<b>Lipid Management:</b> Reduce saturated and trans fats intake; re-assess lipid panel in 3 months.")
+        
+    return "<br/>".join([f"• {r}" for r in recs])
+
+
+# --- SCIENTIFIC PATIENT EXPLANATION GENERATOR ---
 def generate_patient_explanation(risk_level, systolic, diastolic, bmi, smoking, activity, family_history, cholesterol):
     explanation = []
     
@@ -229,16 +239,14 @@ def generate_patient_explanation(risk_level, systolic, diastolic, bmi, smoking, 
     return "<br/><br/>".join(explanation)
 
 
-# ================================================================
-# 5. SIDEBAR NAVIGATION
-# ================================================================
+# --- SIDEBAR NAVIGATION ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/387/387581.png", width=70)
     st.markdown("### **Hypertension AI**")
     page = option_menu(
         menu_title=None,
-        options=["🏥 Risk Detection", "📊 Model Intelligence", "💡 Project Overview"],
-        icons=["activity", "cpu", "info-circle"],
+        options=["🏥 Risk Detection", "📁 Batch Processing", "📊 Model Intelligence", "💡 Project Overview"],
+        icons=["activity", "file-earmark-spreadsheet", "cpu", "info-circle"],
         menu_icon="cast",
         default_index=0,
         styles={
@@ -323,7 +331,7 @@ if page == "🏥 Risk Detection":
         probability = best_model.predict_proba(X_new_sel)[0]
 
         risk_map = {0: "Low Risk", 1: "Moderate Risk", 2: "High Risk"}
-        risk_level = risk_map.get(prediction, f"Category {prediction}")
+        risk_level = risk_map[prediction]
 
         # Styled Risk Output Banners
         if prediction == 2:
@@ -368,15 +376,9 @@ if page == "🏥 Risk Detection":
             try:
                 explainer = shap.Explainer(best_model, X_new_sel)
                 shap_values = explainer(X_new_sel)
-                
-                # Check dimension handling for multi-class vs single array
-                val_matrix = shap_values.values[0]
-                if len(val_matrix.shape) > 1:
-                    val_matrix = val_matrix[:, prediction]
-
                 shap_df = pd.DataFrame({
-                    "Feature": [f"Feature {i}" for i in selected_features],
-                    "SHAP Value": np.round(val_matrix, 4)
+                    "Feature": selected_features,
+                    "SHAP Value": np.round(shap_values.values[0], 4)
                 }).sort_values(by="SHAP Value", ascending=True)
                 
                 fig_shap = px.bar(
@@ -393,12 +395,45 @@ if page == "🏥 Risk Detection":
                 )
                 st.plotly_chart(fig_shap, use_container_width=True)
             except Exception:
-                st.info("SHAP visualization unavailable for current model structure.")
+                st.info("SHAP visualization unavailable for current configuration.")
             st.markdown("</div>", unsafe_allow_html=True)
 
-        # Plain Language Clinical Explanation Block
+        # --- ADVANCED EXPLAINABILITY: SHAP WATERFALL & FORCE PLOTS ---
         st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
-        st.markdown("<div class='section-label'>📖 Evidence-Based Patient Explanation</div>", unsafe_allow_html=True)
+        st.markdown("<div class='section-label'>🔬 Advanced SHAP Visualizations (Waterfall & Force Plots)</div>", unsafe_allow_html=True)
+        try:
+            explainer_adv = shap.Explainer(best_model, X_new_sel)
+            shap_values_adv = explainer_adv(X_new_sel)
+
+            tab_waterfall, tab_force = st.tabs(["🌊 Waterfall Plot", "⚡ Force Plot"])
+
+            with tab_waterfall:
+                st.caption("Waterfall plot displays step-by-step impact of individual features on model output.")
+                if len(shap_values_adv.shape) == 3:
+                    fig_wf = shap.plots.waterfall(shap_values_adv[0, :, prediction], show=False)
+                else:
+                    fig_wf = shap.plots.waterfall(shap_values_adv[0], show=False)
+                st.pyplot(fig_wf)
+
+            with tab_force:
+                st.caption("Force plot illustrates push-and-pull forces of features against base probability.")
+                shap.initjs()
+                if len(shap_values_adv.shape) == 3:
+                    base_val = explainer_adv.expected_value[prediction] if isinstance(explainer_adv.expected_value, (list, np.ndarray)) else explainer_adv.expected_value
+                    force_plot = shap.plots.force(base_val, shap_values_adv.values[0, :, prediction], X_new_sel[0], feature_names=selected_features)
+                else:
+                    base_val = explainer_adv.expected_value
+                    force_plot = shap.plots.force(base_val, shap_values_adv.values[0], X_new_sel[0], feature_names=selected_features)
+                
+                shap_html = f"<head>{shap.getjs()}</head><body>{force_plot.html()}</body>"
+                components.html(shap_html, height=180)
+        except Exception as e:
+            st.info("Advanced SHAP rendering unavailable for current model format.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # Dynamic Recommendations & Plain Language Clinical Explanation Block
+        st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
+        st.markdown("<div class='section-label'>📖 Evidence-Based Patient Explanation & Recommendations</div>", unsafe_allow_html=True)
         
         scientific_explanation = generate_patient_explanation(
             risk_level=risk_level,
@@ -410,8 +445,58 @@ if page == "🏥 Risk Detection":
             family_history=family_history,
             cholesterol=cholesterol
         )
+
+        clinical_recs = generate_clinical_recommendations(
+            risk_level=risk_level,
+            systolic=systolic_bp,
+            diastolic=diastolic_bp,
+            bmi=bmi,
+            smoking=smoking_status,
+            activity=physical_activity,
+            cholesterol=cholesterol
+        )
         
-        st.markdown(scientific_explanation, unsafe_allow_html=True)
+        st.write(scientific_explanation.replace("<br/>", "\n").replace("<b>", "**").replace("</b>", "**").replace("<i>", "*").replace("</i>", "*"), unsafe_allow_html=True)
+        st.markdown("<br><b>💡 Targeted Clinical Recommendations:</b>", unsafe_allow_html=True)
+        st.write(clinical_recs.replace("<br/>", "\n").replace("<b>", "**").replace("</b>", "**"), unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        # --- DYNAMIC "WHAT-IF" SCENARIO TESTING ---
+        st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
+        st.markdown("<div class='section-label'>🔄 Dynamic 'What-If' Scenario Simulator</div>", unsafe_allow_html=True)
+        st.caption("Adjust prospective lifestyle or clinical changes to observe real-time predicted risk adjustments.")
+
+        sim_col1, sim_col2, sim_col3 = st.columns(3)
+        with sim_col1:
+            sim_systolic = st.slider("Simulated Systolic BP", 80, 220, int(systolic_bp))
+            sim_diastolic = st.slider("Simulated Diastolic BP", 40, 140, int(diastolic_bp))
+        with sim_col2:
+            sim_bmi = st.slider("Simulated BMI", 10.0, 50.0, float(bmi))
+            sim_cholesterol = st.slider("Simulated Cholesterol", 100, 400, int(cholesterol))
+        with sim_col3:
+            sim_smoking = st.selectbox("Simulated Smoking Status", ["No", "Yes"], index=0 if smoking_status=="No" else 1)
+            sim_activity = st.selectbox("Simulated Physical Activity", ["High", "Moderate", "Low"], index=0 if physical_activity=="High" else (1 if physical_activity=="Moderate" else 2))
+
+        sim_df = input_data.copy()
+        sim_df['Systolic_BP'] = sim_systolic
+        sim_df['Diastolic_BP'] = sim_diastolic
+        sim_df['BMI'] = sim_bmi
+        sim_df['Cholesterol'] = sim_cholesterol
+        sim_df['Smoking_Status'] = sim_smoking
+        sim_df['Physical_Activity_Level'] = sim_activity
+
+        X_sim = preprocessor.transform(sim_df)
+        X_sim_sel = X_sim[:, selected_features]
+        sim_prob = best_model.predict_proba(X_sim_sel)[0]
+        sim_pred = best_model.predict(X_sim_sel)[0]
+        sim_risk_level = risk_map[sim_pred]
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        w1, w2 = st.columns(2)
+        with w1:
+            st.metric(label="Original High Risk Probability", value=f"{probability[2]*100:.1f}%")
+        with w2:
+            st.metric(label="Simulated High Risk Probability", value=f"{sim_prob[2]*100:.1f}%", delta=f"{(sim_prob[2] - probability[2])*100:.1f}%", delta_color="inverse")
         st.markdown("</div>", unsafe_allow_html=True)
 
         # PDF Report Generator Engine
@@ -467,8 +552,13 @@ if page == "🏥 Risk Detection":
             elements.append(Paragraph(scientific_explanation, body_style))
             elements.append(Spacer(1, 12))
             
+            # Clinical Recommendations
+            elements.append(Paragraph("<b>3. Automated Clinical Recommendations</b>", section_heading))
+            elements.append(Paragraph(clinical_recs, body_style))
+            elements.append(Spacer(1, 12))
+
             # Clinical Metrics Table
-            elements.append(Paragraph("<b>3. Patient Baseline Parameters</b>", section_heading))
+            elements.append(Paragraph("<b>4. Patient Baseline Parameters</b>", section_heading))
             param_data = [
                 ["Parameter", "Value", "Parameter", "Value"],
                 ["Age", f"{age} yrs", "Cholesterol", f"{cholesterol} mg/dL"],
@@ -496,6 +586,59 @@ if page == "🏥 Risk Detection":
         pdf_file = create_pdf()
         with open(pdf_file, "rb") as f:
             st.download_button("📥 Download Official Patient Medical Report (PDF)", f, file_name="Hypertension_Patient_Report.pdf")
+
+# ================================================================
+# --- NEW PAGE: BATCH PROCESSING ---
+# ================================================================
+elif page == "📁 Batch Processing":
+    st.markdown("""
+        <div class='header-box'>
+            <h1>📁 Batch CSV Patient Risk Processing</h1>
+            <p>Upload a CSV file containing multiple patient records to run bulk inferences.</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
+    st.markdown("<div class='section-label'>📤 Upload Patient Dataset (CSV Format)</div>", unsafe_allow_html=True)
+    st.caption("CSV must contain columns matching: Age, Gender, Occupation, BMI, Systolic_BP, Diastolic_BP, Cholesterol, Smoking_Status, Alcohol_Consumption, Physical_Activity_Level, Family_History.")
+
+    uploaded_file = st.file_uploader("Choose a CSV File", type=["csv"])
+
+    if uploaded_file is not None:
+        try:
+            df_batch = pd.read_csv(uploaded_file)
+            st.markdown("### 📋 Uploaded Raw Data Preview")
+            st.dataframe(df_batch.head(), use_container_width=True)
+
+            if st.button("⚡ Execute Batch Inferences"):
+                X_batch_prep = preprocessor.transform(df_batch)
+                X_batch_sel = X_batch_prep[:, selected_features]
+
+                batch_preds = best_model.predict(X_batch_sel)
+                batch_probs = best_model.predict_proba(X_batch_sel)
+
+                risk_map = {0: "Low Risk", 1: "Moderate Risk", 2: "High Risk"}
+                df_batch['Predicted_Risk_Level'] = [risk_map[p] for p in batch_preds]
+                df_batch['Low_Risk_Probability'] = np.round(batch_probs[:, 0], 3)
+                df_batch['Moderate_Risk_Probability'] = np.round(batch_probs[:, 1], 3)
+                df_batch['High_Risk_Probability'] = np.round(batch_probs[:, 2], 3)
+
+                st.markdown("---")
+                st.markdown("### 📊 Batch Screening Results")
+                st.dataframe(df_batch, use_container_width=True)
+
+                # Batch Distribution Summary Chart
+                fig_batch = px.histogram(df_batch, x="Predicted_Risk_Level", color="Predicted_Risk_Level", 
+                                         color_discrete_map={"Low Risk": "#10b981", "Moderate Risk": "#f59e0b", "High Risk": "#ef4444"},
+                                         title="Cohort Risk Distribution")
+                st.plotly_chart(fig_batch, use_container_width=True)
+
+                # Download Results CSV
+                csv_out = df_batch.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Download Batch Risk Assessment CSV", data=csv_out, file_name="Batch_Hypertension_Predictions.csv", mime="text/csv")
+        except Exception as e:
+            st.error(f"Error processing CSV file: {e}")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # ================================================================
 # --- PAGE 2: MODEL INTELLIGENCE ---
