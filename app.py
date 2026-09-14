@@ -14,7 +14,17 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import io
 
 # ================================================================
-# 1. LOAD MODEL PIPELINE & ARTIFACTS
+# 1. PAGE CONFIGURATION (MUST BE FIRST STREAMLIT COMMAND)
+# ================================================================
+st.set_page_config(
+    page_title="Hypertension Clinical Risk Intelligence Platform",
+    page_icon="🩺",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ================================================================
+# 2. LOAD MODEL PIPELINE & ARTIFACTS
 # ================================================================
 @st.cache_resource
 def load_artifacts():
@@ -30,15 +40,8 @@ except Exception as e:
     st.stop()
 
 # ================================================================
-# 2. PAGE CONFIGURATION & STYLING
+# 3. STYLING & HELPER FUNCTIONS
 # ================================================================
-st.set_page_config(
-    page_title="Hypertension Clinical Risk Intelligence Platform",
-    page_icon="🩺",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
 st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -74,7 +77,7 @@ def st_shap(plot, height=220):
     components.html(shap_html, height=height)
 
 # ================================================================
-# 3. EVIDENCE-BASED PLAIN LANGUAGE & CLINICAL RECOMMENDATIONS
+# 4. EVIDENCE-BASED PLAIN LANGUAGE & CLINICAL RECOMMENDATIONS
 # ================================================================
 def generate_plain_explanation(risk_level, systolic, diastolic, bmi, smoking, activity, cholesterol, family_hist):
     explanation = []
@@ -86,7 +89,6 @@ def generate_plain_explanation(risk_level, systolic, diastolic, bmi, smoking, ac
     else:
         explanation.append("<b>Overall Assessment:</b> Your blood pressure parameters currently fall within normal target ranges. Maintaining healthy daily habits will preserve your cardiovascular health.")
 
-    # Specific evidence-based factors
     if systolic >= 130 or diastolic >= 80:
         explanation.append(f"• <b>Blood Pressure ({systolic}/{diastolic} mmHg):</b> Clinical studies show that blood pressure above 120/80 mmHg creates increased resistance in arterial walls, gradually weakening vascular elasticity over time.")
     if bmi >= 25.0:
@@ -125,7 +127,7 @@ def get_clinical_recommendations(risk_level, bmi, systolic, diastolic, smoking, 
     return recs
 
 # ================================================================
-# 4. PDF REPORT GENERATOR
+# 5. PDF REPORT GENERATOR
 # ================================================================
 def create_pdf_report(patient_info, risk_level, probabilities, plain_explanation, clinical_recs):
     buffer = io.BytesIO()
@@ -133,19 +135,16 @@ def create_pdf_report(patient_info, risk_level, probabilities, plain_explanation
     story = []
     styles = getSampleStyleSheet()
 
-    # Custom PDF Styles
     title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=20, leading=24, textColor=colors.HexColor('#0f172a'))
     subtitle_style = ParagraphStyle('DocSubTitle', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=14, textColor=colors.HexColor('#64748b'))
     section_heading = ParagraphStyle('SectionHeading', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=13, leading=17, textColor=colors.HexColor('#1e293b'), spaceBefore=12, spaceAfter=6)
     body_style = ParagraphStyle('Body', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=13.5, textColor=colors.HexColor('#334155'))
 
-    # Header
     story.append(Paragraph("Hypertension Clinical Evaluation Report", title_style))
     story.append(Paragraph("AI-Assisted Cardiovascular Risk Stratification & Patient Summary", subtitle_style))
     story.append(Spacer(1, 10))
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#e2e8f0'), spaceAfter=15))
 
-    # Patient Details Table
     story.append(Paragraph("Patient Clinical Details", section_heading))
     patient_data = [
         [Paragraph(f"<b>Age:</b> {patient_info['Age']}", body_style), Paragraph(f"<b>Gender:</b> {patient_info['Gender']}", body_style), Paragraph(f"<b>BMI:</b> {patient_info['BMI']} kg/m²", body_style)],
@@ -163,20 +162,17 @@ def create_pdf_report(patient_info, risk_level, probabilities, plain_explanation
     story.append(t_patient)
     story.append(Spacer(1, 12))
 
-    # Predicted Risk Section
     story.append(Paragraph(f"Assessed Risk Status: <b>{risk_level}</b>", section_heading))
     prob_text = f"Class Probabilities — Low Risk: {probabilities[0]*100:.1f}% | Moderate Risk: {probabilities[1]*100:.1f}% | High Risk: {probabilities[2]*100:.1f}%"
     story.append(Paragraph(prob_text, body_style))
     story.append(Spacer(1, 10))
 
-    # Plain Language Explanation
     story.append(Paragraph("Plain-Language Risk Explanation", section_heading))
     for exp in plain_explanation:
         story.append(Paragraph(exp, body_style))
         story.append(Spacer(1, 4))
     story.append(Spacer(1, 8))
 
-    # Actionable Clinical Guidelines
     story.append(Paragraph("Evidence-Based Clinical Guidelines & Lifestyle Recommendations", section_heading))
     for rec in clinical_recs:
         story.append(Paragraph(f"• {rec}", body_style))
@@ -187,7 +183,7 @@ def create_pdf_report(patient_info, risk_level, probabilities, plain_explanation
     return buffer
 
 # ================================================================
-# 5. NAVIGATION SIDEBAR
+# 6. NAVIGATION SIDEBAR
 # ================================================================
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/387/387581.png", width=65)
@@ -246,7 +242,7 @@ if page == "🏥 Individual Assessment":
     if eval_button:
         patient_dict = {
             'Age': age, 'Gender': gender, 'Occupation': occupation, 'BMI': bmi,
-            'Systolic_BP': systolic_bp, 'Diastolic_BP': diastolic_diastolic_bp if 'diastolic_diastolic_bp' in locals() else diastolic_bp,
+            'Systolic_BP': systolic_bp, 'Diastolic_BP': diastolic_bp,
             'Cholesterol': cholesterol, 'Smoking_Status': smoking_status,
             'Alcohol_Consumption': alcohol, 'Physical_Activity_Level': physical_activity,
             'Family_History': family_history
@@ -262,7 +258,6 @@ if page == "🏥 Individual Assessment":
         risk_map = {0: "Low Risk", 1: "Moderate Risk", 2: "High Risk"}
         risk_level = risk_map.get(pred, f"Category {pred}")
 
-        # Display Assessed Risk Badge & Probability Gauge
         st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
         st.markdown("<div class='section-label'>🎯 Risk Stratification Summary</div>", unsafe_allow_html=True)
         
@@ -294,7 +289,6 @@ if page == "🏥 Individual Assessment":
             st.plotly_chart(fig_prob, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Advanced SHAP Explainability Plots
         st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
         st.markdown("<div class='section-label'>🧠 Explainable AI: SHAP Force & Feature Impact</div>", unsafe_allow_html=True)
         st.write("SHAP (SHapley Additive exPlanations) visualizes how each patient physiological parameter shifts the prediction away from the baseline model average.")
@@ -310,11 +304,10 @@ if page == "🏥 Individual Assessment":
                 feature_names=[f"Feature {i}" for i in selected_features]
             )
             st_shap(force_plot, height=180)
-        except Exception as e:
+        except Exception:
             st.info("Interactive SHAP force plot is rendering in standard summary mode.")
         st.markdown("</div>", unsafe_allow_html=True)
 
-        # Plain Language & Clinical Recommendations
         plain_exp = generate_plain_explanation(risk_level, systolic_bp, diastolic_bp, bmi, smoking_status, physical_activity, cholesterol, family_history)
         clinical_recs = get_clinical_recommendations(risk_level, bmi, systolic_bp, diastolic_bp, smoking_status, physical_activity, cholesterol)
 
@@ -335,7 +328,6 @@ if page == "🏥 Individual Assessment":
                 st.markdown("<br>", unsafe_allow_html=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
-        # Download PDF Button
         st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
         st.markdown("<div class='section-label'>📄 Export Medical Assessment Report</div>", unsafe_allow_html=True)
         pdf_bytes = create_pdf_report(patient_dict, risk_level, probs, plain_exp, clinical_recs)
@@ -373,7 +365,6 @@ elif page == "🧪 Scenario Analysis (What-If)":
         sim_act = st.select_slider("Physical Activity Level", options=["Low", "Moderate", "High"], value="Low")
         sim_alc = st.selectbox("Alcohol Consumption Level", ["Moderate", "None", "High"])
 
-    # Model Inference for Simulated State
     sim_input = pd.DataFrame([{
         'Age': sim_age, 'Gender': "Male", 'Occupation': "Office Worker", 'BMI': sim_bmi,
         'Systolic_BP': sim_sys, 'Diastolic_BP': sim_dia, 'Cholesterol': sim_chol,
