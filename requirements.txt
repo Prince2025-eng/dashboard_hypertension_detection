@@ -7,4 +7,4 @@ shap>=0.45.1
 lime>=0.2.0.1
 streamlit-option-menu>=0.3.6
 reportlab>=4.1.0
-scikit-learn>=1.5.1
+scikit-learn>=1.4.2
