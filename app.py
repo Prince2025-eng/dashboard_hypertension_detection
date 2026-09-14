@@ -3,483 +3,549 @@ import pandas as pd
 import numpy as np
 import joblib
 import plotly.express as px
-import plotly.graph_objects as go
 import shap
-import streamlit.components.v1 as components
+from lime.lime_tabular import LimeTabularExplainer
 from streamlit_option_menu import option_menu
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-import io
+import os
 
-# ================================================================
-# 1. PAGE CONFIGURATION (MUST BE FIRST STREAMLIT COMMAND)
-# ================================================================
+# --- LOAD MODEL COMPONENTS ---
+best_model = joblib.load("best_model.joblib")
+preprocessor = joblib.load("preprocessor.joblib")
+selected_features = joblib.load("selected_features.joblib")
+
+# --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="Hypertension Clinical Risk Intelligence Platform",
+    page_title="Hypertension Risk Intelligence",
     page_icon="🩺",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ================================================================
-# 2. LOAD MODEL PIPELINE & ARTIFACTS
-# ================================================================
-@st.cache_resource
-def load_artifacts():
-    best_model = joblib.load("best_model.joblib")
-    preprocessor = joblib.load("preprocessor.joblib")
-    selected_features = joblib.load("selected_features.joblib")
-    return best_model, preprocessor, selected_features
-
-try:
-    best_model, preprocessor, selected_features = load_artifacts()
-except Exception as e:
-    st.error(f"Error loading model artifacts: {e}. Ensure 'best_model.joblib', 'preprocessor.joblib', and 'selected_features.joblib' are present.")
-    st.stop()
-
-# ================================================================
-# 3. STYLING & HELPER FUNCTIONS
-# ================================================================
+# --- MODERN CUSTOM CSS STYLING ---
 st.markdown("""
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-        .stApp { background-color: #f8fafc; }
+        /* Main background and typography */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        
+        html, body, [class*="css"] {
+            font-family: 'Inter', sans-serif;
+        }
+        
+        .stApp {
+            background-color: #f8fafc;
+        }
+
+        /* Top Header Container */
         .header-box {
             background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-            padding: 2.2rem; border-radius: 16px; color: white; text-align: center; margin-bottom: 25px;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            padding: 2.2rem 2rem;
+            border-radius: 16px;
+            color: white;
+            text-align: center;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15);
         }
-        .header-box h1 { color: #ffffff !important; font-size: 2.2em !important; font-weight: 700 !important; margin-bottom: 8px !important; }
-        .header-box p { color: #94a3b8 !important; font-size: 1.05em !important; margin: 0 !important; }
+        
+        .header-box h1 {
+            color: #ffffff !important;
+            font-size: 2.3em !important;
+            font-weight: 700 !important;
+            margin-bottom: 8px !important;
+        }
+
+        .header-box p {
+            color: #94a3b8 !important;
+            font-size: 1.05em !important;
+            margin: 0 !important;
+        }
+
+        /* Clean Card Layouts */
         .custom-card {
-            background-color: #ffffff; border-radius: 14px; padding: 24px 28px;
-            border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 22px;
+            background-color: #ffffff;
+            border-radius: 14px;
+            padding: 22px 26px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            margin-bottom: 20px;
         }
-        .section-label { font-size: 1.15em; font-weight: 700; color: #1e293b; margin-bottom: 14px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+
+        /* Dynamic Risk Banner Cards */
+        .risk-banner-high {
+            background: linear-gradient(135deg, #fef2f2 0%, #ffe4e6 100%);
+            border-left: 6px solid #ef4444;
+            padding: 18px 22px;
+            border-radius: 12px;
+            color: #991b1b;
+            font-weight: 700;
+            font-size: 1.35em;
+            margin-bottom: 15px;
+        }
+        
+        .risk-banner-moderate {
+            background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+            border-left: 6px solid #f59e0b;
+            padding: 18px 22px;
+            border-radius: 12px;
+            color: #92400e;
+            font-weight: 700;
+            font-size: 1.35em;
+            margin-bottom: 15px;
+        }
+
+        .risk-banner-low {
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            border-left: 6px solid #10b981;
+            padding: 18px 22px;
+            border-radius: 12px;
+            color: #065f46;
+            font-weight: 700;
+            font-size: 1.35em;
+            margin-bottom: 15px;
+        }
+
+        /* Metric Pill Displays */
+        .metric-pill {
+            background-color: #f1f5f9;
+            border-radius: 10px;
+            padding: 12px 16px;
+            text-align: center;
+            border: 1px solid #e2e8f0;
+        }
+        .metric-pill .val {
+            font-size: 1.3em;
+            font-weight: 700;
+            color: #0f172a;
+        }
+        .metric-pill .lbl {
+            font-size: 0.82em;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Action Buttons */
         .stButton>button {
-            width: 100%; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: white;
-            font-weight: 600; border-radius: 10px; padding: 12px 20px; border: none; font-size: 1em;
-            transition: all 0.2s ease;
+            width: 100%;
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            color: white;
+            font-weight: 600;
+            font-size: 1.05em;
+            border-radius: 10px;
+            padding: 12px 20px;
+            border: none;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+            transition: all 0.25s ease;
         }
-        .stButton>button:hover { background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%); box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25); }
-        .risk-badge-low { background-color: #dcfce7; color: #166534; padding: 8px 16px; border-radius: 20px; font-weight: 700; font-size: 1.2em; display: inline-block; }
-        .risk-badge-mod { background-color: #fef3c7; color: #92400e; padding: 8px 16px; border-radius: 20px; font-weight: 700; font-size: 1.2em; display: inline-block; }
-        .risk-badge-high { background-color: #fee2e2; color: #991b1b; padding: 8px 16px; border-radius: 20px; font-weight: 700; font-size: 1.2em; display: inline-block; }
+        
+        .stButton>button:hover {
+            background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+            box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+            transform: translateY(-1px);
+        }
+
+        /* Form section headings */
+        .section-label {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 12px;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 6px;
+        }
     </style>
 """, unsafe_allow_html=True)
 
-# Helper function to render SHAP plots natively
-def st_shap(plot, height=220):
-    shap_html = f"<head>{shap.getjs()}</head><body>{plot.html()}</body>"
-    components.html(shap_html, height=height)
 
-# ================================================================
-# 4. EVIDENCE-BASED PLAIN LANGUAGE & CLINICAL RECOMMENDATIONS
-# ================================================================
-def generate_plain_explanation(risk_level, systolic, diastolic, bmi, smoking, activity, cholesterol, family_hist):
+# --- SCIENTIFIC PATIENT EXPLANATION GENERATOR ---
+def generate_patient_explanation(risk_level, systolic, diastolic, bmi, smoking, activity, family_history, cholesterol):
     explanation = []
     
-    if risk_level == "High Risk":
-        explanation.append("<b>Overall Assessment:</b> Your profile shows key physiological markers that place you in the elevated risk category for hypertension. Hypertension means your heart has to work much harder to pump blood through your arteries.")
-    elif risk_level == "Moderate Risk":
-        explanation.append("<b>Overall Assessment:</b> Your blood pressure and cardiovascular indicators show moderate elevation. Early lifestyle adjustments can help keep your pressure in a healthy range.")
+    explanation.append(
+        f"<b>Overall Clinical Summary:</b> Based on your submitted health parameters, the risk model classifies your profile as <b>{risk_level}</b>. "
+        "This indicates your multi-factor profile shows characteristics associated with increased cardiovascular workload over time."
+    )
+    
+    if systolic >= 140 or diastolic >= 90:
+        bp_status = "Stage 2 High Blood Pressure (Hypertension)"
+        bp_note = "Arterial walls experience persistent high pressure, increasing long-term cardiovascular burden."
+    elif systolic >= 130 or diastolic >= 80:
+        bp_status = "Stage 1 High Blood Pressure"
+        bp_note = "Resting blood pressure is elevated above optimal thresholds, warranting monitoring and targeted lifestyle adjustments."
+    elif systolic >= 120 and diastolic < 80:
+        bp_status = "Elevated Blood Pressure"
+        bp_note = "Readings are slightly above normal, though not officially categorized as clinical hypertension."
     else:
-        explanation.append("<b>Overall Assessment:</b> Your blood pressure parameters currently fall within normal target ranges. Maintaining healthy daily habits will preserve your cardiovascular health.")
-
-    if systolic >= 130 or diastolic >= 80:
-        explanation.append(f"• <b>Blood Pressure ({systolic}/{diastolic} mmHg):</b> Clinical studies show that blood pressure above 120/80 mmHg creates increased resistance in arterial walls, gradually weakening vascular elasticity over time.")
-    if bmi >= 25.0:
-        explanation.append(f"• <b>Body Mass Index ({bmi} kg/m²):</b> Research confirms that extra body weight increases total blood volume demand, forcing the heart to pump with higher baseline pressure.")
-    if smoking == "Yes":
-        explanation.append("• <b>Smoking Status:</b> Nicotine causes immediate temporary narrowing of blood vessels (vasoconstriction) and damages endothelial vascular lining over time.")
-    if activity == "Low":
-        explanation.append("• <b>Physical Activity:</b> Regular aerobic exercise conditions cardiac muscle, allowing the heart to pump more blood with less exertion, lowering baseline arterial pressure.")
-    if cholesterol >= 200:
-        explanation.append(f"• <b>Total Cholesterol ({cholesterol} mg/dL):</b> Elevated cholesterol contributes to plaque accumulation in blood vessels, narrowing arteries and escalating circulatory resistance.")
-    if family_hist == "Yes":
-        explanation.append("• <b>Family History:</b> Genetic predispositions influence arterial wall stiffness and renal sodium handling, making proactive health monitoring essential.")
-
-    return explanation
-
-def get_clinical_recommendations(risk_level, bmi, systolic, diastolic, smoking, activity, cholesterol):
-    recs = []
-    if risk_level in ["High Risk", "Moderate Risk"]:
-        recs.append("<b>DASH Diet Pattern:</b> Transition to the Dietary Approaches to Stop Hypertension (DASH) eating plan—rich in vegetables, fruits, whole grains, and low-fat dairy while reducing saturated fats.")
-        recs.append("<b>Sodium Restriction:</b> Reduce dietary sodium to under 1,500 mg–2,300 mg per day to directly lessen circulatory fluid pressure.")
+        bp_status = "Normal / Optimal Range"
+        bp_note = "Resting blood pressure is within normal physiological limits (<120/80 mmHg)."
+        
+    explanation.append(f"• <b>Blood Pressure ({systolic}/{diastolic} mmHg):</b> Categorized as <i>{bp_status}</i>. {bp_note}")
+    
+    if bmi >= 30:
+        explanation.append(f"• <b>Body Mass Index ({bmi} kg/m²):</b> Indicates obesity range. Higher body mass elevates vascular resistance, requiring the heart to exert greater force.")
+    elif bmi >= 25:
+        explanation.append(f"• <b>Body Mass Index ({bmi} kg/m²):</b> Indicates overweight range, a known contributing factor to baseline blood pressure elevation.")
     else:
-        recs.append("<b>Balanced Dietary Maintenance:</b> Maintain high intake of potassium-rich foods (e.g., leafy greens, bananas) and dietary fiber to protect arterial walls.")
-
-    if bmi >= 25.0:
-        recs.append("<b>Weight Optimization:</b> Target a progressive weight loss of 5–10% to reduce vascular burden and improve insulin sensitivity.")
-
+        explanation.append(f"• <b>Body Mass Index ({bmi} kg/m²):</b> Within normal body weight range (18.5–24.9 kg/m²).")
+        
+    contributing = []
     if smoking == "Yes":
-        recs.append("<b>Tobacco Cessation Support:</b> Consult a clinician regarding cessation resources; stopping smoking provides immediate vascular elasticity improvements.")
-
+        contributing.append("<b>Tobacco exposure</b> (nicotine causes acute arterial constriction and accelerates endothelial inflammation)")
     if activity == "Low":
-        recs.append("<b>Structured Aerobic Exercise:</b> Engage in at least 150 minutes of moderate-intensity aerobic physical activity weekly (e.g., 30 minutes of brisk walking, 5 days/week).")
-
+        contributing.append("<b>Low physical activity</b> (regular aerobic exercise reduces systemic vascular resistance)")
+    if family_history == "Yes":
+        contributing.append("<b>Family history</b> (genetic predisposition accounts for significant variance in primary hypertension susceptibility)")
     if cholesterol >= 200:
-        recs.append("<b>Lipid Monitoring:</b> Perform a comprehensive lipid profile panel with a medical practitioner to evaluate total cardiovascular risk.")
+        contributing.append(f"<b>Elevated cholesterol ({cholesterol} mg/dL)</b> (lipid accumulation contributes to arterial stiffness)")
+        
+    if contributing:
+        explanation.append("• <b>Primary Contributing Risk Factors:</b><br/> &nbsp;&nbsp;&nbsp;&ndash; " + "<br/> &nbsp;&nbsp;&nbsp;&ndash; ".join(contributing))
+        
+    explanation.append(
+        "<b>Medical Disclaimer & Recommended Actions:</b> This automated summary uses machine learning for health risk stratification and is <b>not a clinical diagnosis</b>. "
+        "It is strongly recommended to share this report with a qualified healthcare professional for formal screening, ambulatory monitoring, and personalized clinical guidance."
+    )
+    
+    return "<br/><br/>".join(explanation)
 
-    return recs
 
-# ================================================================
-# 5. PDF REPORT GENERATOR
-# ================================================================
-def create_pdf_report(patient_info, risk_level, probabilities, plain_explanation, clinical_recs):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
-    story = []
-    styles = getSampleStyleSheet()
-
-    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=20, leading=24, textColor=colors.HexColor('#0f172a'))
-    subtitle_style = ParagraphStyle('DocSubTitle', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=14, textColor=colors.HexColor('#64748b'))
-    section_heading = ParagraphStyle('SectionHeading', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=13, leading=17, textColor=colors.HexColor('#1e293b'), spaceBefore=12, spaceAfter=6)
-    body_style = ParagraphStyle('Body', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=13.5, textColor=colors.HexColor('#334155'))
-
-    story.append(Paragraph("Hypertension Clinical Evaluation Report", title_style))
-    story.append(Paragraph("AI-Assisted Cardiovascular Risk Stratification & Patient Summary", subtitle_style))
-    story.append(Spacer(1, 10))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#e2e8f0'), spaceAfter=15))
-
-    story.append(Paragraph("Patient Clinical Details", section_heading))
-    patient_data = [
-        [Paragraph(f"<b>Age:</b> {patient_info['Age']}", body_style), Paragraph(f"<b>Gender:</b> {patient_info['Gender']}", body_style), Paragraph(f"<b>BMI:</b> {patient_info['BMI']} kg/m²", body_style)],
-        [Paragraph(f"<b>Systolic BP:</b> {patient_info['Systolic_BP']} mmHg", body_style), Paragraph(f"<b>Diastolic BP:</b> {patient_info['Diastolic_BP']} mmHg", body_style), Paragraph(f"<b>Cholesterol:</b> {patient_info['Cholesterol']} mg/dL", body_style)],
-        [Paragraph(f"<b>Smoking:</b> {patient_info['Smoking_Status']}", body_style), Paragraph(f"<b>Activity:</b> {patient_info['Physical_Activity_Level']}", body_style), Paragraph(f"<b>Family History:</b> {patient_info['Family_History']}", body_style)]
-    ]
-    t_patient = Table(patient_data, colWidths=[170, 170, 170])
-    t_patient.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
-        ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#cbd5e1')),
-        ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
-        ('TOPPADDING', (0,0), (-1,-1), 6),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-    ]))
-    story.append(t_patient)
-    story.append(Spacer(1, 12))
-
-    story.append(Paragraph(f"Assessed Risk Status: <b>{risk_level}</b>", section_heading))
-    prob_text = f"Class Probabilities — Low Risk: {probabilities[0]*100:.1f}% | Moderate Risk: {probabilities[1]*100:.1f}% | High Risk: {probabilities[2]*100:.1f}%"
-    story.append(Paragraph(prob_text, body_style))
-    story.append(Spacer(1, 10))
-
-    story.append(Paragraph("Plain-Language Risk Explanation", section_heading))
-    for exp in plain_explanation:
-        story.append(Paragraph(exp, body_style))
-        story.append(Spacer(1, 4))
-    story.append(Spacer(1, 8))
-
-    story.append(Paragraph("Evidence-Based Clinical Guidelines & Lifestyle Recommendations", section_heading))
-    for rec in clinical_recs:
-        story.append(Paragraph(f"• {rec}", body_style))
-        story.append(Spacer(1, 4))
-
-    doc.build(story)
-    buffer.seek(0)
-    return buffer
-
-# ================================================================
-# 6. NAVIGATION SIDEBAR
-# ================================================================
+# --- SIDEBAR NAVIGATION ---
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/387/387581.png", width=65)
-    st.markdown("### **Hypertension AI Platform**")
+    st.image("https://cdn-icons-png.flaticon.com/512/387/387581.png", width=70)
+    st.markdown("### **Hypertension AI**")
     page = option_menu(
         menu_title=None,
-        options=[
-            "🏥 Individual Assessment", 
-            "🧪 Scenario Analysis (What-If)", 
-            "📂 Batch Processing", 
-            "📊 Model Evaluation Metrics"
-        ],
-        icons=["person-fill", "sliders", "file-earmark-spreadsheet-fill", "bar-chart-line-fill"],
+        options=["🏥 Risk Detection", "📊 Model Intelligence", "💡 Project Overview"],
+        icons=["activity", "cpu", "info-circle"],
+        menu_icon="cast",
         default_index=0,
         styles={
             "container": {"background-color": "transparent"},
-            "icon": {"color": "#2563eb", "font-size": "16px"},
-            "nav-link": {"font-size": "14px", "text-align": "left", "margin": "4px", "border-radius": "8px"},
+            "icon": {"color": "#2563eb", "font-size": "18px"},
+            "nav-link": {"font-size": "15px", "text-align": "left", "margin": "4px", "border-radius": "8px"},
             "nav-link-selected": {"background-color": "#2563eb", "color": "white"},
         },
     )
+    st.markdown("---")
+    st.caption("🩺 **Clinical Decision Support System**")
+    st.caption("Powered by Machine Learning & Predictive Analytics.")
 
 # ================================================================
-# PAGE 1: INDIVIDUAL ASSESSMENT
+# --- PAGE 1: HYPERTENSION RISK DETECTION ---
 # ================================================================
-if page == "🏥 Individual Assessment":
+if page == "🏥 Risk Detection":
     st.markdown("""
         <div class='header-box'>
-            <h1>🩺 Individual Patient Risk Assessment</h1>
-            <p>Input patient parameters to assess hypertension risk, view SHAP explainability, and download medical reports.</p>
+            <h1>🩺 Hypertension Risk Assessment Tool</h1>
+            <p>Enter patient physiological parameters to perform automated clinical stratification.</p>
         </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
-    st.markdown("<div class='section-label'>📋 Clinical Input Data</div>", unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        age = st.number_input("Age (Years)", 10, 100, 45)
-        gender = st.selectbox("Gender", ["Male", "Female"])
-        occupation = st.text_input("Occupation", "Professional")
-    with col2:
-        bmi = st.number_input("BMI (kg/m²)", 10.0, 60.0, 28.4)
-        systolic_bp = st.number_input("Systolic BP (mmHg)", 80, 250, 138)
-        diastolic_bp = st.number_input("Diastolic BP (mmHg)", 40, 150, 88)
-    with col3:
-        cholesterol = st.number_input("Total Cholesterol (mg/dL)", 100, 400, 215)
-        smoking_status = st.selectbox("Smoking Status", ["No", "Yes"])
-        alcohol = st.selectbox("Alcohol Consumption", ["Moderate", "None", "High"])
-        physical_activity = st.selectbox("Physical Activity Level", ["Low", "Moderate", "High"])
-        family_history = st.selectbox("Family History of Hypertension", ["Yes", "No"])
-
-    eval_button = st.button("⚡ Evaluate Patient Risk Profile")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    if eval_button:
-        patient_dict = {
-            'Age': age, 'Gender': gender, 'Occupation': occupation, 'BMI': bmi,
-            'Systolic_BP': systolic_bp, 'Diastolic_BP': diastolic_bp,
-            'Cholesterol': cholesterol, 'Smoking_Status': smoking_status,
-            'Alcohol_Consumption': alcohol, 'Physical_Activity_Level': physical_activity,
-            'Family_History': family_history
-        }
-        input_df = pd.DataFrame([patient_dict])
-
-        # Preprocessing & Prediction
-        X_trans = preprocessor.transform(input_df)
-        X_selected = X_trans[:, selected_features]
-        
-        pred = best_model.predict(X_selected)[0]
-        probs = best_model.predict_proba(X_selected)[0]
-        risk_map = {0: "Low Risk", 1: "Moderate Risk", 2: "High Risk"}
-        risk_level = risk_map.get(pred, f"Category {pred}")
-
+    # Input Form Layout
+    with st.container():
         st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
-        st.markdown("<div class='section-label'>🎯 Risk Stratification Summary</div>", unsafe_allow_html=True)
+        st.markdown("<div class='section-label'>📋 Patient Clinical Parameters</div>", unsafe_allow_html=True)
         
-        res_col1, res_col2 = st.columns([1, 2])
-        with res_col1:
-            st.markdown("##### Assigned Risk Category:")
-            if risk_level == "Low Risk":
-                st.markdown("<span class='risk-badge-low'>🟢 Low Risk</span>", unsafe_allow_html=True)
-            elif risk_level == "Moderate Risk":
-                st.markdown("<span class='risk-badge-mod'>🟡 Moderate Risk</span>", unsafe_allow_html=True)
-            else:
-                st.markdown("<span class='risk-badge-high'>🔴 High Risk</span>", unsafe_allow_html=True)
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.write(f"**Low Risk Probability:** {probs[0]*100:.1f}%")
-            st.write(f"**Moderate Risk Probability:** {probs[1]*100:.1f}%")
-            st.write(f"**High Risk Probability:** {probs[2]*100:.1f}%")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            age = st.number_input("Age (Years)", min_value=10, max_value=100, value=35)
+            gender = st.selectbox("Gender", ["Male", "Female"])
+            occupation = st.text_input("Occupation", "Teacher")
+        with col2:
+            bmi = st.number_input("BMI (kg/m²)", min_value=10.0, max_value=60.0, value=24.5)
+            systolic_bp = st.number_input("Systolic BP (mmHg)", min_value=80, max_value=250, value=120)
+            diastolic_bp = st.number_input("Diastolic BP (mmHg)", min_value=40, max_value=150, value=80)
+        with col3:
+            cholesterol = st.number_input("Total Cholesterol (mg/dL)", min_value=100, max_value=400, value=180)
+            smoking_status = st.selectbox("Smoking Status", ["Yes", "No"])
+            alcohol = st.selectbox("Alcohol Consumption", ["None", "Moderate", "High"])
+            physical_activity = st.selectbox("Physical Activity Level", ["Low", "Moderate", "High"])
+            family_history = st.selectbox("Family History of Hypertension", ["Yes", "No"])
 
-        with res_col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        predict_btn = st.button("⚡ Calculate Risk & Generate Report")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # Quick Metrics Display Bar
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.markdown(f"<div class='metric-pill'><div class='val'>{systolic_bp}/{diastolic_bp}</div><div class='lbl'>Blood Pressure</div></div>", unsafe_allow_html=True)
+    with m2:
+        st.markdown(f"<div class='metric-pill'><div class='val'>{bmi}</div><div class='lbl'>Body Mass Index</div></div>", unsafe_allow_html=True)
+    with m3:
+        st.markdown(f"<div class='metric-pill'><div class='val'>{cholesterol} mg/dL</div><div class='lbl'>Cholesterol</div></div>", unsafe_allow_html=True)
+    with m4:
+        st.markdown(f"<div class='metric-pill'><div class='val'>{family_history}</div><div class='lbl'>Family History</div></div>", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # --- PREDICTION SECTION ---
+    if predict_btn:
+        input_data = pd.DataFrame({
+            'Age': [age],
+            'Gender': [gender],
+            'Occupation': [occupation],
+            'BMI': [bmi],
+            'Systolic_BP': [systolic_bp],
+            'Diastolic_BP': [diastolic_bp],
+            'Cholesterol': [cholesterol],
+            'Smoking_Status': [smoking_status],
+            'Alcohol_Consumption': [alcohol],
+            'Physical_Activity_Level': [physical_activity],
+            'Family_History': [family_history]
+        })
+
+        X_new = preprocessor.transform(input_data)
+        X_new_sel = X_new[:, selected_features]
+        prediction = best_model.predict(X_new_sel)[0]
+        probability = best_model.predict_proba(X_new_sel)[0]
+
+        risk_map = {0: "Low Risk", 1: "Moderate Risk", 2: "High Risk"}
+        risk_level = risk_map[prediction]
+
+        # Styled Risk Output Banners
+        if prediction == 2:
+            st.markdown(f"<div class='risk-banner-high'>🔴 Predicted Category: High Risk</div>", unsafe_allow_html=True)
+        elif prediction == 1:
+            st.markdown(f"<div class='risk-banner-moderate'>🟡 Predicted Category: Moderate Risk</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div class='risk-banner-low'>🟢 Predicted Category: Low Risk</div>", unsafe_allow_html=True)
+
+        col_left, col_right = st.columns([1, 1])
+
+        # Interactive Chart
+        with col_left:
+            st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
+            st.markdown("<div class='section-label'>📊 Model Risk Probability Distribution</div>", unsafe_allow_html=True)
+            prob_df = pd.DataFrame({
+                "Risk Category": ["Low Risk", "Moderate Risk", "High Risk"],
+                "Probability": probability
+            })
             fig_prob = px.bar(
-                x=["Low Risk", "Moderate Risk", "High Risk"],
-                y=probs,
-                labels={'x': 'Risk Category', 'y': 'Probability'},
-                color=["Low Risk", "Moderate Risk", "High Risk"],
+                prob_df, 
+                x="Risk Category", 
+                y="Probability", 
+                color="Risk Category",
                 color_discrete_sequence=["#10b981", "#f59e0b", "#ef4444"],
                 text_auto='.1%'
             )
-            fig_prob.update_layout(height=220, showlegend=False, margin=dict(l=10, r=10, t=20, b=20))
-            st.plotly_chart(fig_prob, use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
-        st.markdown("<div class='section-label'>🧠 Explainable AI: SHAP Force & Feature Impact</div>", unsafe_allow_html=True)
-        st.write("SHAP (SHapley Additive exPlanations) visualizes how each patient physiological parameter shifts the prediction away from the baseline model average.")
-        
-        try:
-            explainer = shap.Explainer(best_model, X_selected)
-            shap_values = explainer(X_selected)
-            
-            st.markdown("##### **1. SHAP Force Plot**")
-            force_plot = shap.plots.force(
-                explainer.expected_value[pred],
-                shap_values.values[0][:, pred],
-                feature_names=[f"Feature {i}" for i in selected_features]
+            fig_prob.update_layout(
+                showlegend=False, 
+                height=320, 
+                margin=dict(l=10, r=10, t=10, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)"
             )
-            st_shap(force_plot, height=180)
-        except Exception:
-            st.info("Interactive SHAP force plot is rendering in standard summary mode.")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        plain_exp = generate_plain_explanation(risk_level, systolic_bp, diastolic_bp, bmi, smoking_status, physical_activity, cholesterol, family_history)
-        clinical_recs = get_clinical_recommendations(risk_level, bmi, systolic_bp, diastolic_bp, smoking_status, physical_activity, cholesterol)
-
-        col_left, col_right = st.columns(2)
-        with col_left:
-            st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
-            st.markdown("<div class='section-label'>💬 Plain-Language Patient Explanation</div>", unsafe_allow_html=True)
-            for item in plain_exp:
-                st.markdown(f"{item}", unsafe_allow_html=True)
-                st.markdown("<br>", unsafe_allow_html=True)
+            st.plotly_chart(fig_prob, use_container_width=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
+        # Explainability SHAP Chart
         with col_right:
             st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
-            st.markdown("<div class='section-label'>🩺 Clinical Guidelines & Recommendations</div>", unsafe_allow_html=True)
-            for rec in clinical_recs:
-                st.markdown(f"• {rec}", unsafe_allow_html=True)
-                st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("<div class='section-label'>🧠 Feature Contribution (SHAP Analysis)</div>", unsafe_allow_html=True)
+            try:
+                explainer = shap.Explainer(best_model, X_new_sel)
+                shap_values = explainer(X_new_sel)
+                shap_df = pd.DataFrame({
+                    "Feature": selected_features,
+                    "SHAP Value": np.round(shap_values.values[0], 4)
+                }).sort_values(by="SHAP Value", ascending=True)
+                
+                fig_shap = px.bar(
+                    shap_df,
+                    x="SHAP Value", y="Feature", orientation="h",
+                    color="SHAP Value", color_continuous_scale="Blues",
+                )
+                fig_shap.update_layout(
+                    showlegend=False, 
+                    height=320, 
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)"
+                )
+                st.plotly_chart(fig_shap, use_container_width=True)
+            except Exception:
+                st.info("SHAP visualization unavailable for current configuration.")
             st.markdown("</div>", unsafe_allow_html=True)
 
+        # Plain Language Clinical Explanation Block
         st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
-        st.markdown("<div class='section-label'>📄 Export Medical Assessment Report</div>", unsafe_allow_html=True)
-        pdf_bytes = create_pdf_report(patient_dict, risk_level, probs, plain_exp, clinical_recs)
-        st.download_button(
-            label="📥 Download Clinical PDF Report",
-            data=pdf_bytes,
-            file_name=f"Hypertension_Report_{patient_dict['Age']}yr_{risk_level.replace(' ', '_')}.pdf",
-            mime="application/pdf"
+        st.markdown("<div class='section-label'>📖 Evidence-Based Patient Explanation</div>", unsafe_allow_html=True)
+        
+        scientific_explanation = generate_patient_explanation(
+            risk_level=risk_level,
+            systolic=systolic_bp,
+            diastolic=diastolic_bp,
+            bmi=bmi,
+            smoking=smoking_status,
+            activity=physical_activity,
+            family_history=family_history,
+            cholesterol=cholesterol
         )
+        
+        st.write(scientific_explanation.replace("<br/>", "\n").replace("<b>", "**").replace("</b>", "**").replace("<i>", "*").replace("</i>", "*"), unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
+        # PDF Report Generator Engine
+        def create_pdf():
+            pdf_path = "Hypertension_Patient_Report.pdf"
+            doc = SimpleDocTemplate(
+                pdf_path,
+                pagesize=A4,
+                rightMargin=36,
+                leftMargin=36,
+                topMargin=36,
+                bottomMargin=36
+            )
+            styles = getSampleStyleSheet()
+            
+            title_style = ParagraphStyle('ReportTitle', parent=styles['Heading1'], fontSize=18, leading=22, textColor=colors.HexColor("#1E293B"), spaceAfter=12)
+            section_heading = ParagraphStyle('SectionHeading', parent=styles['Heading2'], fontSize=12, leading=15, textColor=colors.HexColor("#2563EB"), spaceBefore=10, spaceAfter=6)
+            body_style = ParagraphStyle('ReportBody', parent=styles['Normal'], fontSize=9.5, leading=13, textColor=colors.HexColor("#334155"))
+            
+            elements = []
+            
+            # PDF Header
+            elements.append(Paragraph("🩺 Hypertension Clinical Screening Report", title_style))
+            elements.append(Paragraph("<b>Automated Clinical Decision Support Summary</b>", body_style))
+            elements.append(Spacer(1, 10))
+            
+            # Risk Summary
+            elements.append(Paragraph("<b>1. Diagnostic Risk Prediction</b>", section_heading))
+            elements.append(Paragraph(f"<b>Categorized Risk Profile:</b> {risk_level}", body_style))
+            elements.append(Spacer(1, 8))
+            
+            # Probability Table
+            prob_data = [
+                ["Risk Category", "Low Risk", "Moderate Risk", "High Risk"],
+                ["Estimated Probability", f"{probability[0]*100:.1f}%", f"{probability[1]*100:.1f}%", f"{probability[2]*100:.1f}%"]
+            ]
+            prob_table = Table(prob_data, colWidths=[130, 110, 110, 110])
+            prob_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1E293B")),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#E2E8F0")),
+            ]))
+            elements.append(prob_table)
+            elements.append(Spacer(1, 12))
+            
+            # Scientific Explanation Section
+            elements.append(Paragraph("<b>2. Plain-Language Scientific Summary</b>", section_heading))
+            elements.append(Paragraph(scientific_explanation, body_style))
+            elements.append(Spacer(1, 12))
+            
+            # Clinical Metrics Table
+            elements.append(Paragraph("<b>3. Patient Baseline Parameters</b>", section_heading))
+            param_data = [
+                ["Parameter", "Value", "Parameter", "Value"],
+                ["Age", f"{age} yrs", "Cholesterol", f"{cholesterol} mg/dL"],
+                ["Gender", f"{gender}", "Smoking Status", f"{smoking_status}"],
+                ["BMI", f"{bmi} kg/m²", "Alcohol Use", f"{alcohol}"],
+                ["Systolic BP", f"{systolic_bp} mmHg", "Physical Activity", f"{physical_activity}"],
+                ["Diastolic BP", f"{diastolic_bp} mmHg", "Family History", f"{family_history}"]
+            ]
+            param_table = Table(param_data, colWidths=[120, 120, 120, 120])
+            param_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (1, 0), colors.HexColor("#F1F5F9")),
+                ('BACKGROUND', (2, 0), (3, 0), colors.HexColor("#F1F5F9")),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8.5),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ]))
+            elements.append(param_table)
+            
+            doc.build(elements)
+            return pdf_path
+
+        pdf_file = create_pdf()
+        with open(pdf_file, "rb") as f:
+            st.download_button("📥 Download Official Patient Medical Report (PDF)", f, file_name="Hypertension_Patient_Report.pdf")
+
 # ================================================================
-# PAGE 2: SCENARIO ANALYSIS (WHAT-IF)
+# --- PAGE 2: MODEL INTELLIGENCE ---
 # ================================================================
-elif page == "🧪 Scenario Analysis (What-If)":
+elif page == "📊 Model Intelligence":
     st.markdown("""
         <div class='header-box'>
-            <h1>🧪 Dynamic "What-If" Interventional Analysis</h1>
-            <p>Interactively adjust patient lifestyle parameters to observe real-time risk reduction dynamics.</p>
+            <h1>📊 Machine Learning Model Intelligence</h1>
+            <p>Comparative analysis and performance metrics across evaluated classifiers.</p>
         </div>
     """, unsafe_allow_html=True)
-
+    
     st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
-    st.markdown("<div class='section-label'>⚙️ Interactive Lifestyle & Physiological Controls</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-label'>🏆 Evaluated Models Summary</div>", unsafe_allow_html=True)
     
-    col_a, col_b = st.columns(2)
-    with col_a:
-        sim_sys = st.slider("Systolic Blood Pressure (mmHg)", 90, 210, 142)
-        sim_dia = st.slider("Diastolic Blood Pressure (mmHg)", 60, 130, 92)
-        sim_bmi = st.slider("Body Mass Index (BMI kg/m²)", 15.0, 50.0, 31.5)
-        sim_age = st.slider("Patient Age (Years)", 18, 90, 52)
-    with col_b:
-        sim_chol = st.slider("Total Cholesterol (mg/dL)", 120, 380, 230)
-        sim_smoke = st.selectbox("Simulate Smoking Cessation", ["Yes", "No"], index=0)
-        sim_act = st.select_slider("Physical Activity Level", options=["Low", "Moderate", "High"], value="Low")
-        sim_alc = st.selectbox("Alcohol Consumption Level", ["Moderate", "None", "High"])
-
-    sim_input = pd.DataFrame([{
-        'Age': sim_age, 'Gender': "Male", 'Occupation': "Office Worker", 'BMI': sim_bmi,
-        'Systolic_BP': sim_sys, 'Diastolic_BP': sim_dia, 'Cholesterol': sim_chol,
-        'Smoking_Status': sim_smoke, 'Alcohol_Consumption': sim_alc,
-        'Physical_Activity_Level': sim_act, 'Family_History': "Yes"
-    }])
-
-    sim_trans = preprocessor.transform(sim_input)[:, selected_features]
-    sim_probs = best_model.predict_proba(sim_trans)[0]
-
-    st.markdown("<div class='section-label' style='margin-top: 20px;'>📊 Dynamic Risk Re-Calculation</div>", unsafe_allow_html=True)
-    
-    sc1, sc2 = st.columns([1, 2])
-    with sc1:
-        st.metric(label="High Risk Probability", value=f"{sim_probs[2]*100:.1f}%")
-        st.metric(label="Moderate Risk Probability", value=f"{sim_probs[1]*100:.1f}%")
-        st.metric(label="Low Risk Probability", value=f"{sim_probs[0]*100:.1f}%")
-
-    with sc2:
-        df_sim = pd.DataFrame({"Category": ["Low Risk", "Moderate Risk", "High Risk"], "Probability": sim_probs})
-        fig_sim = px.bar(df_sim, x="Category", y="Probability", color="Category", color_discrete_sequence=["#10b981", "#f59e0b", "#ef4444"], text_auto='.1%')
-        fig_sim.update_layout(height=260, showlegend=False)
-        st.plotly_chart(fig_sim, use_container_width=True)
-        
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ================================================================
-# PAGE 3: BATCH PROCESSING
-# ================================================================
-elif page == "📂 Batch Processing":
-    st.markdown("""
-        <div class='header-box'>
-            <h1>📂 Bulk Patient CSV Diagnostics</h1>
-            <p>Upload multi-patient CSV files for continuous batch inference and summary downloads.</p>
-        </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
-    st.markdown("<div class='section-label'>📤 Batch Dataset Upload</div>", unsafe_allow_html=True)
-    
-    uploaded_file = st.file_uploader("Choose a CSV file containing patient clinical records", type=["csv"])
-
-    if uploaded_file is not None:
-        batch_df = pd.read_csv(uploaded_file)
-        st.markdown("##### Preview Uploaded Data:")
-        st.dataframe(batch_df.head())
-
-        if st.button("⚡ Run Batch AI Diagnostics"):
-            try:
-                batch_trans = preprocessor.transform(batch_df)[:, selected_features]
-                batch_preds = best_model.predict(batch_trans)
-                batch_probs = best_model.predict_proba(batch_trans)
-
-                risk_map = {0: "Low Risk", 1: "Moderate Risk", 2: "High Risk"}
-                batch_df["Predicted_Risk_Category"] = [risk_map.get(p, f"Class {p}") for p in batch_preds]
-                batch_df["Low_Risk_Prob (%)"] = np.round(batch_probs[:, 0] * 100, 2)
-                batch_df["Moderate_Risk_Prob (%)"] = np.round(batch_probs[:, 1] * 100, 2)
-                batch_df["High_Risk_Prob (%)"] = np.round(batch_probs[:, 2] * 100, 2)
-
-                st.success("Batch risk classification completed successfully!")
-                st.dataframe(batch_df)
-
-                out_csv = batch_df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download Diagnostic Results (CSV)",
-                    data=out_csv,
-                    file_name="Hypertension_Batch_Diagnostic_Results.csv",
-                    mime="text/csv"
-                )
-            except Exception as ex:
-                st.error(f"Error executing batch classification. Please check column format. Details: {ex}")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ================================================================
-# PAGE 4: MODEL EVALUATION METRICS
-# ================================================================
-elif page == "📊 Model Evaluation Metrics":
-    st.markdown("""
-        <div class='header-box'>
-            <h1>📊 Model Evaluation & Cross-Validation Metrics</h1>
-            <p>Performance validation metrics and comparative analysis of candidate machine learning classifiers.</p>
-        </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
-    st.markdown("<div class='section-label'>🏆 Cross-Validation Performance Summary</div>", unsafe_allow_html=True)
-    
-    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("Overall Accuracy", "92.4%", "+1.2%")
-    col_m2.metric("Weighted Precision", "91.8%", "+0.8%")
-    col_m3.metric("Weighted Recall", "92.4%", "+1.1%")
-    col_m4.metric("ROC-AUC Score", "0.962", "+0.015")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("##### Candidate Model Comparison Across Stratified Folds")
-    
-    metrics_data = pd.DataFrame({
-        "Model Architecture": ["Random Forest Classifier", "XGBoost Classifier", "Logistic Regression", "Support Vector Machine (SVM)"],
-        "Accuracy (%)": [92.4, 91.8, 86.5, 85.2],
-        "Precision (%)": [91.8, 91.2, 85.8, 84.6],
-        "Recall (%)": [92.4, 91.8, 86.5, 85.2],
-        "F1 Score (%)": [92.1, 91.5, 86.1, 84.9],
-        "ROC-AUC": [0.962, 0.958, 0.912, 0.898]
+    results_df = pd.DataFrame({
+        "Model Architecture": ["Logistic Regression", "Support Vector Machine (SVM)", "Neural Network (MLP)"],
+        "Accuracy": [0.720, 0.755, 0.763],
+        "Precision": [0.750, 0.759, 0.768],
+        "Recall": [0.720, 0.755, 0.763],
+        "F1-Score": [0.693, 0.752, 0.760],
+        "ROC-AUC": [0.877, 0.880, 0.882]
     })
     
-    st.dataframe(metrics_data, use_container_width=True)
-
-    fig_metrics = px.bar(
-        metrics_data,
-        x="Model Architecture",
-        y="Accuracy (%)",
-        color="Model Architecture",
-        title="Model Accuracy Comparison",
-        text_auto=True
+    numeric_cols = ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]
+    st.dataframe(
+        results_df.style.background_gradient(cmap="Blues", subset=numeric_cols).format("{:.3f}", subset=numeric_cols),
+        use_container_width=True
     )
-    fig_metrics.update_layout(height=320, showlegend=False)
-    st.plotly_chart(fig_metrics, use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ================================================================
+# --- PAGE 3: PROJECT OVERVIEW ---
+# ================================================================
+elif page == "💡 Project Overview":
+    st.markdown("""
+        <div class='header-box'>
+            <h1>💡 About the Hypertension Screening Tool</h1>
+            <p>AI-assisted health stratification designed to support early detection and clinical decision-making.</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
+    st.markdown("""
+    ### 🎯 Research & Clinical Objectives
+    This system applies advanced **machine learning techniques** to assess hypertension risk using non-invasive clinical indicators and lifestyle metrics.
+    
+    * **Target Parameters:** Age, BMI, Blood Pressure, Lipid Profile, Smoking Habits, Physical Activity, and Family History.
+    * **Deployment Goal:** Enable early screening, improve public health intervention workflows, and provide evidence-based summaries for patients.
+    """)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<div class='custom-card'>", unsafe_allow_html=True)
+    st.markdown("<div class='section-label'>💬 Patient & Practitioner Feedback Form</div>", unsafe_allow_html=True)
+    
+    with st.form("feedback_form", clear_on_submit=True):
+        name = st.text_input("Name")
+        email = st.text_input("Email (optional)")
+        feedback_text = st.text_area("Feedback / Clinical Suggestions")
+        submitted = st.form_submit_button("📩 Submit Feedback")
+
+        if submitted:
+            if feedback_text.strip() == "":
+                st.warning("⚠️ Please enter your comments before submitting.")
+            else:
+                feedback_entry = pd.DataFrame({
+                    "Name": [name],
+                    "Email": [email],
+                    "Feedback": [feedback_text],
+                    "Timestamp": [pd.Timestamp.now()]
+                })
+                try:
+                    file_exists = os.path.isfile("user_feedback.csv")
+                    feedback_entry.to_csv("user_feedback.csv", mode="a", header=not file_exists, index=False)
+                    st.success("✅ Feedback successfully logged. Thank you!")
+                except Exception as e:
+                    st.error(f"Error saving feedback: {e}")
     st.markdown("</div>", unsafe_allow_html=True)
