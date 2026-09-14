@@ -192,7 +192,14 @@ elif page == "📊 Model Overview":
     })
     numeric_cols = ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]
     st.markdown("### 📈 Model Performance Table")
-    st.dataframe(results_df.style.background_gradient(cmap="Blues", subset=numeric_cols).format("{:.3f}"), use_container_width=True)
+    # Select strictly numeric columns to prevent string formatting crashes
+numeric_cols = results_df.select_dtypes(include=["number"]).columns.tolist()
+
+# Display styled dataframe with format restricted only to numeric columns
+st.dataframe(
+    results_df.style.background_gradient(cmap="Blues", subset=numeric_cols).format("{:.3f}", subset=numeric_cols),
+    use_container_width=True
+)
 
 # ================================================================
 # --- PAGE 3: ABOUT THE TOOL (With Feedback Form) ---
