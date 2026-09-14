@@ -192,9 +192,8 @@ elif page == "📊 Model Overview":
     })
     numeric_cols = ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]
     st.markdown("### 📈 Model Performance Table")
-    # Select strictly numeric columns to prevent string formatting crashes
+  # Select strictly numeric columns to prevent string formatting crashes
 numeric_cols = results_df.select_dtypes(include=["number"]).columns.tolist()
-
 # Display styled dataframe with format restricted only to numeric columns
 st.dataframe(
     results_df.style.background_gradient(cmap="Blues", subset=numeric_cols).format("{:.3f}", subset=numeric_cols),
@@ -207,15 +206,9 @@ st.dataframe(
 elif page == "💡 About this Tool":
     st.markdown("<h1 class='main-title'>💡 About this Tool</h1>", unsafe_allow_html=True)
     st.markdown("""
-    This dashboard was developed by **Prince Amponsah**, a passionate **Data Science student**,  
-    as part of his **final-year thesis project**.  
+    This dashboard was developed as part of a research project to predict the **risk level of hypertension among Ghanaians** using advanced **machine learning algorithms** that analyze health and lifestyle factors such as **age, BMI, blood pressure, cholesterol, smoking habits, and family history**.  
 
-    The tool aims to predict the **risk level of hypertension among Ghanaians** using advanced  
-    **machine learning algorithms** that analyze health and lifestyle factors such as **age, BMI,  
-    blood pressure, cholesterol, smoking habits, and family history**.  
-
-    The project demonstrates how **data-driven intelligence** can empower healthcare systems,  
-    improve preventive screening, and promote public health across Ghana.  
+    The project demonstrates how **data-driven intelligence** can empower healthcare systems, improve preventive screening, and promote public health across Ghana.  
     """)
     st.info("🩺 Empowering healthcare through data science and machine learning.")
 
