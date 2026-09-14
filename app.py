@@ -12,12 +12,9 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import os
 
-# --- LOAD MODEL COMPONENTS ---
-best_model = joblib.load("best_model.joblib")
-preprocessor = joblib.load("preprocessor.joblib")
-selected_features = joblib.load("selected_features.joblib")
-
-# --- PAGE CONFIGURATION ---
+# ================================================================
+# 1. PAGE CONFIGURATION (MUST BE THE FIRST STREAMLIT COMMAND)
+# ================================================================
 st.set_page_config(
     page_title="Hypertension Risk Intelligence",
     page_icon="🩺",
@@ -25,7 +22,25 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# --- MODERN CUSTOM CSS STYLING ---
+# ================================================================
+# 2. LOAD MODEL COMPONENTS WITH CACHING
+# ================================================================
+@st.cache_resource
+def load_artifacts():
+    best_model = joblib.load("best_model.joblib")
+    preprocessor = joblib.load("preprocessor.joblib")
+    selected_features = joblib.load("selected_features.joblib")
+    return best_model, preprocessor, selected_features
+
+try:
+    best_model, preprocessor, selected_features = load_artifacts()
+except Exception as e:
+    st.error(f"Error loading model artifacts: {e}. Please ensure 'best_model.joblib', 'preprocessor.joblib', and 'selected_features.joblib' are in the application root directory.")
+    st.stop()
+
+# ================================================================
+# 3. MODERN CUSTOM CSS STYLING
+# ================================================================
 st.markdown("""
     <style>
         /* Main background and typography */
@@ -160,7 +175,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- SCIENTIFIC PATIENT EXPLANATION GENERATOR ---
+# ================================================================
+# 4. SCIENTIFIC PATIENT EXPLANATION GENERATOR
+# ================================================================
 def generate_patient_explanation(risk_level, systolic, diastolic, bmi, smoking, activity, family_history, cholesterol):
     explanation = []
     
@@ -212,7 +229,9 @@ def generate_patient_explanation(risk_level, systolic, diastolic, bmi, smoking, 
     return "<br/><br/>".join(explanation)
 
 
-# --- SIDEBAR NAVIGATION ---
+# ================================================================
+# 5. SIDEBAR NAVIGATION
+# ================================================================
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/387/387581.png", width=70)
     st.markdown("### **Hypertension AI**")
@@ -304,7 +323,7 @@ if page == "🏥 Risk Detection":
         probability = best_model.predict_proba(X_new_sel)[0]
 
         risk_map = {0: "Low Risk", 1: "Moderate Risk", 2: "High Risk"}
-        risk_level = risk_map[prediction]
+        risk_level = risk_map.get(prediction, f"Category {prediction}")
 
         # Styled Risk Output Banners
         if prediction == 2:
@@ -349,9 +368,15 @@ if page == "🏥 Risk Detection":
             try:
                 explainer = shap.Explainer(best_model, X_new_sel)
                 shap_values = explainer(X_new_sel)
+                
+                # Check dimension handling for multi-class vs single array
+                val_matrix = shap_values.values[0]
+                if len(val_matrix.shape) > 1:
+                    val_matrix = val_matrix[:, prediction]
+
                 shap_df = pd.DataFrame({
-                    "Feature": selected_features,
-                    "SHAP Value": np.round(shap_values.values[0], 4)
+                    "Feature": [f"Feature {i}" for i in selected_features],
+                    "SHAP Value": np.round(val_matrix, 4)
                 }).sort_values(by="SHAP Value", ascending=True)
                 
                 fig_shap = px.bar(
@@ -368,7 +393,7 @@ if page == "🏥 Risk Detection":
                 )
                 st.plotly_chart(fig_shap, use_container_width=True)
             except Exception:
-                st.info("SHAP visualization unavailable for current configuration.")
+                st.info("SHAP visualization unavailable for current model structure.")
             st.markdown("</div>", unsafe_allow_html=True)
 
         # Plain Language Clinical Explanation Block
@@ -386,7 +411,7 @@ if page == "🏥 Risk Detection":
             cholesterol=cholesterol
         )
         
-        st.write(scientific_explanation.replace("<br/>", "\n").replace("<b>", "**").replace("</b>", "**").replace("<i>", "*").replace("</i>", "*"), unsafe_allow_html=True)
+        st.markdown(scientific_explanation, unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
         # PDF Report Generator Engine
