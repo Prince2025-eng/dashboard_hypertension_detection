@@ -9,7 +9,7 @@ from streamlit_option_menu import option_menu
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import os
 
 # --- LOAD MODEL COMPONENTS ---
@@ -24,6 +24,67 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# --- SCIENTIFIC PATIENT EXPLANATION GENERATOR ---
+def generate_patient_explanation(risk_level, systolic, diastolic, bmi, smoking, activity, family_history, cholesterol):
+    """
+    Generates a plain-language, scientifically grounded clinical explanation 
+    based on WHO and ACC/AHA hypertension management guidelines.
+    """
+    explanation = []
+    
+    # 1. Overall Summary
+    explanation.append(
+        f"<b>Overall Clinical Summary:</b> Based on your submitted health parameters, the risk model classifies your profile as <b>{risk_level}</b>. "
+        "This indicates your multi-factor profile shows characteristics associated with increased cardiovascular workload over time."
+    )
+    
+    # 2. Blood Pressure Evaluation (ACC/AHA Guidelines)
+    if systolic >= 140 or diastolic >= 90:
+        bp_status = "Stage 2 High Blood Pressure (Hypertension)"
+        bp_note = "Arterial walls experience persistent high pressure, increasing long-term cardiovascular burden."
+    elif systolic >= 130 or diastolic >= 80:
+        bp_status = "Stage 1 High Blood Pressure"
+        bp_note = "Resting blood pressure is elevated above optimal thresholds, warranting monitoring and targeted lifestyle adjustments."
+    elif systolic >= 120 and diastolic < 80:
+        bp_status = "Elevated Blood Pressure"
+        bp_note = "Readings are slightly above normal, though not officially categorized as clinical hypertension."
+    else:
+        bp_status = "Normal / Optimal Range"
+        bp_note = "Resting blood pressure is within normal physiological limits (<120/80 mmHg)."
+        
+    explanation.append(f"• <b>Blood Pressure ({systolic}/{diastolic} mmHg):</b> Categorized as <i>{bp_status}</i>. {bp_note}")
+    
+    # 3. BMI & Lipid Metrics
+    if bmi >= 30:
+        explanation.append(f"• <b>Body Mass Index ({bmi} kg/m²):</b> Indicates obesity range. Higher body mass elevates vascular resistance, requiring the heart to exert greater force.")
+    elif bmi >= 25:
+        explanation.append(f"• <b>Body Mass Index ({bmi} kg/m²):</b> Indicates overweight range, a known contributing factor to baseline blood pressure elevation.")
+    else:
+        explanation.append(f"• <b>Body Mass Index ({bmi} kg/m²):</b> Within normal body weight range (18.5–24.9 kg/m²).")
+        
+    # 4. Lifestyle & Genetic Factors
+    contributing = []
+    if smoking == "Yes":
+        contributing.append("<b>Tobacco exposure</b> (nicotine causes acute arterial constriction and accelerates endothelial inflammation)")
+    if activity == "Low":
+        contributing.append("<b>Low physical activity</b> (regular aerobic exercise reduces systemic vascular resistance)")
+    if family_history == "Yes":
+        contributing.append("<b>Family history</b> (genetic predisposition accounts for significant variance in primary hypertension susceptibility)")
+    if cholesterol >= 200:
+        contributing.append(f"<b>Elevated cholesterol ({cholesterol} mg/dL)</b> (lipid accumulation contributes to arterial stiffness)")
+        
+    if contributing:
+        explanation.append("• <b>Primary Contributing Risk Factors:</b><br/> &nbsp;&nbsp;&nbsp;&ndash; " + "<br/> &nbsp;&nbsp;&nbsp;&ndash; ".join(contributing))
+        
+    # 5. Scientific Recommendation
+    explanation.append(
+        "<b>Medical Disclaimer & Recommended Actions:</b> This automated summary uses machine learning for health risk stratification and is <b>not a clinical diagnosis</b>. "
+        "It is strongly recommended to share this report with a qualified healthcare professional for formal screening, ambulatory monitoring, and personalized clinical guidance."
+    )
+    
+    return "<br/><br/>".join(explanation)
+
 
 # --- SIDEBAR NAVIGATION ---
 with st.sidebar:
@@ -110,18 +171,34 @@ if page == "🏥 Hypertension Risk Detection":
         risk_map = {0: "🟢 Low Risk", 1: "🟡 Moderate Risk", 2: "🔴 High Risk"}
         risk_level = risk_map[prediction]
 
+        # Generate Plain-Language Medical Explanation
+        scientific_explanation = generate_patient_explanation(
+            risk_level=risk_level,
+            systolic=systolic_bp,
+            diastolic=diastolic_bp,
+            bmi=bmi,
+            smoking=smoking_status,
+            activity=physical_activity,
+            family_history=family_history,
+            cholesterol=cholesterol
+        )
+
         st.markdown("<div class='card'>", unsafe_allow_html=True)
         st.subheader("🧾 Prediction Results")
         st.markdown(f"<p class='risk-label'>Predicted Hypertension Risk: {risk_level}</p>", unsafe_allow_html=True)
+        
         st.markdown("#### 🔢 Prediction Probabilities")
         st.bar_chart(pd.DataFrame({
             "Risk Level": ["Low", "Moderate", "High"],
             "Probability": probability
         }).set_index("Risk Level"))
 
-        # Explanation Section
-        st.markdown("### 🧠 Explanation of Results")
-        explanation_text = ""
+        # Explanation Section (On-Screen)
+        st.markdown("### 📋 Clinical Interpretation & Guidance")
+        st.write(scientific_explanation.replace("<br/>", "\n").replace("<b>", "**").replace("</b>", "**").replace("<i>", "*").replace("</i>", "*"), unsafe_allow_html=True)
+
+        # Feature Importance Section
+        st.markdown("### 🧠 Feature Impact Analysis")
         try:
             explainer = shap.Explainer(best_model, X_new_sel)
             shap_values = explainer(X_new_sel)
@@ -137,37 +214,92 @@ if page == "🏥 Hypertension Risk Detection":
                 title="Feature Influence on Risk Prediction"
             )
             st.plotly_chart(fig_shap, use_container_width=True)
-            st.info("The above chart shows how each factor influenced your hypertension risk level.")
         except Exception:
-            st.warning("⚠️ SHAP explanation unavailable — using LIME instead.")
+            st.warning("⚠️ SHAP explanation visual unavailable.")
 
-        # PDF Report
+        # PDF Generation Engine
         def create_pdf():
             pdf_path = "Hypertension_Report.pdf"
-            doc = SimpleDocTemplate(pdf_path, pagesize=A4)
+            doc = SimpleDocTemplate(
+                pdf_path,
+                pagesize=A4,
+                rightMargin=36,
+                leftMargin=36,
+                topMargin=36,
+                bottomMargin=36
+            )
             styles = getSampleStyleSheet()
+            
+            # Custom Paragraph Styles
+            title_style = ParagraphStyle('ReportTitle', parent=styles['Heading1'], fontSize=18, leading=22, textColor=colors.HexColor("#2C3E50"), spaceAfter=12)
+            section_heading = ParagraphStyle('SectionHeading', parent=styles['Heading2'], fontSize=13, leading=16, textColor=colors.HexColor("#16A085"), spaceBefore=10, spaceAfter=6)
+            body_style = ParagraphStyle('ReportBody', parent=styles['Normal'], fontSize=9.5, leading=13, textColor=colors.HexColor("#333333"))
+            
             elements = []
-            elements.append(Paragraph("🩺 Hypertension Risk Prediction Report", styles["Title"]))
-            elements.append(Spacer(1, 12))
-            elements.append(Paragraph(f"<b>Predicted Risk:</b> {risk_level}", styles["Normal"]))
-            elements.append(Paragraph(f"<b>Explanation:</b> {explanation_text}", styles["Normal"]))
-            elements.append(Spacer(1, 12))
-            prob_table = Table([["Low", "Moderate", "High"], [f"{probability[0]:.2f}", f"{probability[1]:.2f}", f"{probability[2]:.2f}"]])
+            
+            # Header
+            elements.append(Paragraph("🩺 Hypertension Risk Assessment Report", title_style))
+            elements.append(Paragraph("<b>Generated by AI Health Screening Tool</b>", body_style))
+            elements.append(Spacer(1, 10))
+            
+            # Prediction Summary Box
+            elements.append(Paragraph("<b>1. Prediction Summary</b>", section_heading))
+            elements.append(Paragraph(f"<b>Assessed Risk Level:</b> {risk_level}", body_style))
+            elements.append(Spacer(1, 8))
+            
+            # Probability Table
+            prob_data = [
+                ["Risk Category", "Low Risk", "Moderate Risk", "High Risk"],
+                ["Estimated Probability", f"{probability[0]*100:.1f}%", f"{probability[1]*100:.1f}%", f"{probability[2]*100:.1f}%"]
+            ]
+            prob_table = Table(prob_data, colWidths=[130, 110, 110, 110])
             prob_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER')
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#2C3E50")),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#BDC3C7")),
             ]))
             elements.append(prob_table)
             elements.append(Spacer(1, 12))
-            for key, value in input_data.iloc[0].items():
-                elements.append(Paragraph(f"{key}: {value}", styles["Normal"]))
+            
+            # Scientific Explanation Section
+            elements.append(Paragraph("<b>2. Clinical Interpretation & Evidence-Based Insights</b>", section_heading))
+            elements.append(Paragraph(scientific_explanation, body_style))
+            elements.append(Spacer(1, 12))
+            
+            # Patient Clinical Parameters Table
+            elements.append(Paragraph("<b>3. Input Clinical Metrics</b>", section_heading))
+            param_data = [
+                ["Parameter", "Value", "Parameter", "Value"],
+                ["Age", f"{age} yrs", "Cholesterol", f"{cholesterol} mg/dL"],
+                ["Gender", f"{gender}", "Smoking Status", f"{smoking_status}"],
+                ["BMI", f"{bmi} kg/m²", "Alcohol Use", f"{alcohol}"],
+                ["Systolic BP", f"{systolic_bp} mmHg", "Physical Activity", f"{physical_activity}"],
+                ["Diastolic BP", f"{diastolic_bp} mmHg", "Family History", f"{family_history}"]
+            ]
+            param_table = Table(param_data, colWidths=[120, 120, 120, 120])
+            param_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (1, 0), colors.HexColor("#ECF0F1")),
+                ('BACKGROUND', (2, 0), (3, 0), colors.HexColor("#ECF0F1")),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 8.5),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#BDC3C7")),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ]))
+            elements.append(param_table)
+            
             doc.build(elements)
             return pdf_path
 
         pdf_file = create_pdf()
         with open(pdf_file, "rb") as f:
-            st.download_button("📥 Download Prediction Report (PDF)", f, file_name="Hypertension_Report.pdf")
+            st.download_button("📥 Download Comprehensive Patient Report (PDF)", f, file_name="Hypertension_Patient_Report.pdf")
 
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -192,8 +324,6 @@ elif page == "📊 Model Overview":
     })
     numeric_cols = ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"]
     st.markdown("### 📈 Model Performance Table")
-    
-    # CORRECTED LINE BELOW: Added subset=numeric_cols to .format()
     st.dataframe(
         results_df.style.background_gradient(cmap="Blues", subset=numeric_cols).format("{:.3f}", subset=numeric_cols),
         use_container_width=True
